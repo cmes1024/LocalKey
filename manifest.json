@@ -7,7 +7,12 @@
     "sidePanel",
     "storage",
     "tabs",
-    "activeTab"
+    "activeTab",
+    "scripting",
+    "favicon"
+  ],
+  "host_permissions": [
+    "<all_urls>"
   ],
   "icons": {
     "16": "icons/icon16.png",
@@ -26,6 +31,21 @@
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+P",
+        "mac": "Command+Shift+P"
+      },
+      "description": "快速打开密码管家侧边栏"
     }
   }
 }

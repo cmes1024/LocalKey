@@ -1,5 +1,5 @@
 /**
- * 侧边栏逻辑 - 完整恢复版 (包含回车支持与 CSP 修复)
+ * 侧边栏逻辑 - 进阶版 (支持 Favicon 与 自动填充)
  */
 
 const state = {
@@ -40,13 +40,11 @@ async function checkInitialState() {
 }
 
 function initEventListeners() {
-    // 解锁回车支持
     document.getElementById('master-password').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') handleUnlock();
     });
     document.getElementById('unlock-btn').addEventListener('click', handleUnlock);
 
-    // 导航
     document.getElementById('nav-add-btn').addEventListener('click', () => {
         state.editingId = null;
         document.getElementById('add-url').value = state.currentUrl;
@@ -61,7 +59,6 @@ function initEventListeners() {
     document.getElementById('settings-back-btn').addEventListener('click', () => showView('main'));
     document.getElementById('add-back-btn').addEventListener('click', () => showView('main'));
     
-    // 添加账号回车支持
     ['add-url', 'add-username', 'add-password', 'add-notes'].forEach(id => {
         document.getElementById(id).addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) handleSaveAccount();
@@ -77,10 +74,8 @@ function initEventListeners() {
         document.getElementById('add-password').type = 'text';
     });
 
-    // 搜索
     document.getElementById('search-input').addEventListener('input', (e) => renderVault(e.target.value));
 
-    // 设置项
     document.getElementById('export-data-btn').addEventListener('click', handleExport);
     document.getElementById('import-trigger-btn').addEventListener('click', () => {
         document.getElementById('import-data-file').click();
@@ -89,7 +84,6 @@ function initEventListeners() {
     document.getElementById('lock-vault-btn').addEventListener('click', handleLock);
     document.getElementById('reset-vault-btn').addEventListener('click', handleReset);
     
-    // 复制模板
     document.getElementById('copy-template-btn').addEventListener('click', () => {
         const template = [{"url": "https://example.com", "username": "your_username", "password": "your_password", "notes": "optional"}];
         navigator.clipboard.writeText(JSON.stringify(template, null, 2));
@@ -224,12 +218,55 @@ function renderVault(filter = '') {
         matchCount++;
         const isCurrentSite = item.url.includes(state.currentUrl) && state.currentUrl !== '';
         const parts = splitUrl(item.url);
+        
+        // 使用 Chrome 内置的 Favicon 解析服务 (最稳定、最原生)
+        const cleanHost = parts.host;
+        const faviconUrl = `chrome-extension://${chrome.runtime.id}/_favicon/?pageUrl=${encodeURIComponent(item.url)}&size=64`;
+
         const card = document.createElement('div');
         card.className = `account-card ${isCurrentSite ? 'card-highlight' : ''}`;
         card.innerHTML = `
-            <div class="card-header"><div class="url-display"><div class="url-host">${parts.host}</div>${parts.path ? `<div class="url-path">${parts.path}</div>` : ''}${parts.query ? `<div class="url-params">${parts.query}</div>` : ''}</div><div class="card-actions"><button class="action-btn edit-btn">✏️</button><button class="action-btn delete-btn">🗑️</button></div></div>
-            <div class="card-body"><p><span class="label-text">账号</span><span class="value-text">${item.username}</span><button class="copy-badge copy-user">复制</button></p><p><span class="label-text">密码</span><span class="value-text">••••••••</span><button class="copy-badge copy-pass">复制</button></p>${item.notes ? `<div class="note-box">备注: ${item.notes}</div>` : ''}</div>
+            <div class="card-top">
+                <img class="site-icon" src="${faviconUrl}" onerror="this.src='icons/icon16.png'">
+                <div class="url-host">${parts.host}</div>
+            </div>
+            ${(parts.path || parts.query) ? `
+            <div class="url-details">
+                <div class="url-text-area">
+                    ${parts.path ? `<div class="url-path">${parts.path}</div>` : ''}
+                    ${parts.query ? `<div class="url-params">${parts.query}</div>` : ''}
+                </div>
+                <div class="url-actions">
+                    <button class="url-mini-btn copy-link" title="复制完整链接">🔗</button>
+                    <button class="url-mini-btn open-link" title="新窗口打开">🌐</button>
+                </div>
+            </div>` : ''}
+            <div class="card-body">
+                <p><span class="label-text">账号</span><span class="value-text">${item.username}</span><button class="copy-badge copy-user">复制</button></p>
+                <p><span class="label-text">密码</span><span class="value-text">••••••••</span><button class="copy-badge copy-pass">复制</button></p>
+                ${item.notes ? `<div class="note-box">备注: ${item.notes}</div>` : ''}
+            </div>
+            <div class="card-action-bar">
+                <button class="bar-btn fill-btn main-fill">⚡ 快速填充</button>
+                <div class="side-actions">
+                    <button class="bar-btn edit-btn" title="编辑">✏️</button>
+                    <button class="bar-btn delete-btn" title="删除">🗑️</button>
+                </div>
+            </div>
         `;
+
+        // 链接相关操作
+        if (card.querySelector('.copy-link')) {
+            card.querySelector('.copy-link').addEventListener('click', (e) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(item.url);
+                showToast('链接已复制');
+            });
+            card.querySelector('.open-link').addEventListener('click', (e) => {
+                e.stopPropagation();
+                chrome.tabs.create({ url: item.url });
+            });
+        }
 
         card.querySelector('.copy-user').addEventListener('click', (e) => {
             e.stopPropagation(); navigator.clipboard.writeText(item.username);
@@ -239,16 +276,57 @@ function renderVault(filter = '') {
             e.stopPropagation(); navigator.clipboard.writeText(item.password);
             const btn = e.target; btn.textContent = '已复制'; setTimeout(() => btn.textContent = '复制', 1500);
         });
+        card.querySelector('.fill-btn').addEventListener('click', () => handleFill(item));
         card.querySelector('.edit-btn').addEventListener('click', () => startEdit(item));
         card.querySelector('.delete-btn').addEventListener('click', () => deleteItem(item.id));
 
         if (isCurrentSite && !searchTerm) { currentList.appendChild(card); } else { allList.appendChild(card); }
     });
 
+    // 动态显隐 Section 标题
+    const allAccountsSection = document.getElementById('all-accounts-section');
+    
     if (searchTerm) {
         currentSection.classList.add('hidden');
+        allAccountsSection.classList.remove('hidden');
         if (matchCount === 0) allList.innerHTML = `<div style="text-align:center; padding:40px; color:var(--text-secondary);">没有找到匹配项</div>`;
-    } else { currentSection.classList.remove('hidden'); }
+    } else {
+        // 判断当前网站是否有账号
+        if (currentList.children.length > 0) {
+            currentSection.classList.remove('hidden');
+        } else {
+            currentSection.classList.add('hidden');
+        }
+
+        // 判断所有账号是否有数据
+        if (allList.children.length > 0) {
+            allAccountsSection.classList.remove('hidden');
+        } else {
+            allAccountsSection.classList.add('hidden');
+        }
+    }
+}
+
+async function handleFill(item) {
+    try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab) return;
+        
+        chrome.tabs.sendMessage(tab.id, {
+            type: 'FILL_FORM',
+            data: { username: item.username, password: item.password }
+        }, (response) => {
+            if (chrome.runtime.lastError) {
+                alert('填充失败：请刷新网页后再试（如果是新安装的插件）');
+                return;
+            }
+            if (response && response.status === 'not_found') {
+                alert('未在当前网页找到密码输入框');
+            }
+        });
+    } catch (e) {
+        console.error('Fill error:', e);
+    }
 }
 
 function startEdit(item) {
