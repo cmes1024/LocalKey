@@ -15,7 +15,7 @@ const CryptoUtils = {
             { name: "PBKDF2", salt: salt, iterations: 100000, hash: "SHA-256" },
             baseKey,
             { name: "AES-GCM", length: 256 },
-            false,
+            true,
             ["encrypt", "decrypt"]
         );
     },

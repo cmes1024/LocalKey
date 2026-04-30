@@ -18,6 +18,7 @@ const views = {
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
+    await initTheme(); // 🚀 初始化主题
     await checkInitialState();
     initEventListeners();
     updateCurrentTabInfo();
@@ -31,11 +32,49 @@ function showErrorMessage(elementId, message) {
     setTimeout(() => errorEl.classList.add('hidden'), 3000);
 }
 
+function showToast(message) {
+    const toast = document.createElement('div');
+    toast.className = 'toast-notification';
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => {
+        toast.classList.add('fade-out');
+        setTimeout(() => toast.remove(), 300);
+    }, 2000);
+}
+
 async function checkInitialState() {
-    const result = await chrome.storage.local.get(['salt']);
-    if (!result.salt) {
-        document.querySelector('.welcome-text').textContent = '初始化保险库';
-        document.getElementById('unlock-btn').textContent = '创建主密码';
+    const local = await chrome.storage.local.get(['salt', 'lockTimeout']);
+    if (!local.salt) {
+        document.querySelector('.welcome-text').textContent = '初始化管理空间';
+        document.getElementById('unlock-btn').textContent = '创建管理密码';
+        return;
+    }
+
+    // 设置下拉框初始值
+    const timeoutSelect = document.getElementById('lock-timeout-select');
+    if (timeoutSelect) timeoutSelect.value = local.lockTimeout || "5";
+
+    // 🚀 核心：尝试从 Session 自动解锁
+    const session = await chrome.storage.session.get(['sessionKey', 'lastUnlockedTime']);
+    if (session.sessionKey && session.lastUnlockedTime) {
+        const timeoutMin = parseInt(local.lockTimeout || "5");
+        const now = Date.now();
+        const diff = (now - session.lastUnlockedTime) / (1000 * 60);
+
+        if (timeoutMin > 0 && diff < timeoutMin) {
+            try {
+                // 恢复密钥
+                const keyData = new Uint8Array(atob(session.sessionKey).split('').map(c => c.charCodeAt(0)));
+                state.masterKey = await crypto.subtle.importKey(
+                    "raw", keyData, "AES-GCM", true, ["encrypt", "decrypt"]
+                );
+                state.isUnlocked = true;
+                showView('main');
+                await loadVault();
+                return;
+            } catch (e) { console.error('自动解锁失败', e); }
+        }
     }
 }
 
@@ -47,11 +86,11 @@ function initEventListeners() {
 
     document.getElementById('nav-add-btn').addEventListener('click', () => {
         state.editingId = null;
-        document.getElementById('add-url').value = state.currentUrl;
+        document.getElementById('add-url').value = state.fullUrlWithoutParams || '';
         document.getElementById('add-username').value = '';
         document.getElementById('add-password').value = '';
         document.getElementById('add-notes').value = '';
-        document.querySelector('.view-title').textContent = '添加新账号';
+        document.querySelector('.view-title').textContent = '记录新账号';
         showView('add');
     });
 
@@ -59,11 +98,6 @@ function initEventListeners() {
     document.getElementById('settings-back-btn').addEventListener('click', () => showView('main'));
     document.getElementById('add-back-btn').addEventListener('click', () => showView('main'));
     
-    ['add-url', 'add-username', 'add-password', 'add-notes'].forEach(id => {
-        document.getElementById(id).addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) handleSaveAccount();
-        });
-    });
     document.getElementById('save-account-btn').addEventListener('click', handleSaveAccount);
 
     document.getElementById('generate-pass-btn').addEventListener('click', () => {
@@ -74,7 +108,25 @@ function initEventListeners() {
         document.getElementById('add-password').type = 'text';
     });
 
-    document.getElementById('search-input').addEventListener('input', (e) => renderVault(e.target.value));
+    const searchInput = document.getElementById('search-input');
+    const clearSearchBtn = document.getElementById('clear-search-btn');
+
+    searchInput.addEventListener('input', (e) => {
+        const val = e.target.value;
+        if (val) {
+            clearSearchBtn.classList.remove('hidden');
+        } else {
+            clearSearchBtn.classList.add('hidden');
+        }
+        renderVault(val);
+    });
+
+    clearSearchBtn.addEventListener('click', () => {
+        searchInput.value = '';
+        clearSearchBtn.classList.add('hidden');
+        searchInput.focus();
+        renderVault();
+    });
 
     document.getElementById('export-data-btn').addEventListener('click', handleExport);
     document.getElementById('import-trigger-btn').addEventListener('click', () => {
@@ -94,13 +146,18 @@ function initEventListeners() {
         setTimeout(() => { btn.textContent = oldText; btn.style.color = 'var(--accent-color)'; }, 2000);
     });
 
+    document.getElementById('lock-timeout-select').addEventListener('change', async (e) => {
+        await chrome.storage.local.set({ lockTimeout: e.target.value });
+        showToast('自动锁定设置已更新');
+    });
+
     chrome.tabs.onActivated.addListener(updateCurrentTabInfo);
     chrome.tabs.onUpdated.addListener((id, info) => info.url && updateCurrentTabInfo());
 }
 
 async function handleUnlock() {
     const password = document.getElementById('master-password').value;
-    if (!password) return showErrorMessage('unlock-error', '请输入主密码');
+    if (!password) return showErrorMessage('unlock-error', '请输入管理密码');
     const storage = await chrome.storage.local.get(['salt']);
     try {
         if (!storage.salt) {
@@ -112,6 +169,15 @@ async function handleUnlock() {
             const salt = new Uint8Array(atob(storage.salt).split('').map(c => c.charCodeAt(0)));
             state.masterKey = await CryptoUtils.deriveKey(password, salt);
         }
+
+        // 🚀 核心：将密钥存入 Session 存储
+        const exportedKey = await crypto.subtle.exportKey("raw", state.masterKey);
+        const keyBase64 = btoa(String.fromCharCode(...new Uint8Array(exportedKey)));
+        await chrome.storage.session.set({ 
+            sessionKey: keyBase64, 
+            lastUnlockedTime: Date.now() 
+        });
+
         state.isUnlocked = true; showView('main'); await loadVault();
     } catch (e) { showErrorMessage('unlock-error', '解锁失败'); }
 }
@@ -208,6 +274,8 @@ function renderVault(filter = '') {
     currentList.innerHTML = ''; allList.innerHTML = '';
     const searchTerm = filter.toLowerCase().trim();
     let matchCount = 0;
+    let currentCount = 0;
+    let allCount = 0;
     
     state.vault.forEach(item => {
         const matchesUrl = item.url.toLowerCase().includes(searchTerm);
@@ -280,12 +348,22 @@ function renderVault(filter = '') {
         card.querySelector('.edit-btn').addEventListener('click', () => startEdit(item));
         card.querySelector('.delete-btn').addEventListener('click', () => deleteItem(item.id));
 
-        if (isCurrentSite && !searchTerm) { currentList.appendChild(card); } else { allList.appendChild(card); }
+        if (isCurrentSite && !searchTerm) { 
+            currentList.appendChild(card); 
+            currentCount++;
+        } else { 
+            allList.appendChild(card); 
+            allCount++;
+        }
     });
 
     // 动态显隐 Section 标题
     const allAccountsSection = document.getElementById('all-accounts-section');
     
+    // 🚀 更新统计数字
+    document.getElementById('current-count').textContent = currentCount;
+    document.getElementById('all-count').textContent = allCount;
+
     if (searchTerm) {
         currentSection.classList.add('hidden');
         allAccountsSection.classList.remove('hidden');
@@ -350,8 +428,51 @@ function startEdit(item) {
 
 async function deleteItem(id) { if (confirm('确定删除吗？')) { const r = await chrome.storage.local.get(['vault']); await chrome.storage.local.set({ vault: (r.vault || []).filter(i => i.id !== id) }); await loadVault(); } }
 
+async function handleLock() {
+    state.isUnlocked = false;
+    state.masterKey = null;
+    await chrome.storage.session.remove(['sessionKey', 'lastUnlockedTime']);
+    showView('unlock');
+    showToast('已锁定');
+}
+
 function showView(viewName) { Object.keys(views).forEach(n => views[n].classList.add('hidden')); views[viewName].classList.remove('hidden'); }
 
 async function updateCurrentTabInfo() {
-    try { const [t] = await chrome.tabs.query({ active: true, currentWindow: true }); if (t && t.url) { const u = new URL(t.url); state.currentUrl = u.hostname.replace('www.', ''); if (state.isUnlocked) renderVault(); } } catch (e) {}
+    try { 
+        const [t] = await chrome.tabs.query({ active: true, currentWindow: true }); 
+        if (t && t.url && t.url.startsWith('http')) { 
+            const u = new URL(t.url); 
+            state.currentUrl = u.hostname.replace('www.', ''); 
+            // 🚀 获取不带参数的完整路径
+            state.fullUrlWithoutParams = u.origin + u.pathname;
+            if (state.isUnlocked) renderVault(); 
+        } 
+    } catch (e) {}
+}
+
+/**
+ * 🌓 主题管理 (纯手动模式)
+ */
+async function initTheme() {
+    const result = await chrome.storage.local.get(['theme']);
+    const theme = result.theme || 'dark'; // 默认深色
+    applyTheme(theme);
+
+    document.querySelectorAll('.theme-toggle-btn').forEach(btn => {
+        btn.addEventListener('click', toggleTheme);
+    });
+}
+
+function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+}
+
+async function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme') || 'dark';
+    const next = current === 'dark' ? 'light' : 'dark';
+
+    applyTheme(next);
+    await chrome.storage.local.set({ theme: next });
+    showToast(`已切换至${next === 'dark' ? '深色' : '浅色'}模式`);
 }

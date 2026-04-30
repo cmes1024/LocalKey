@@ -10,37 +10,41 @@
     <div id="app">
         <!-- 解锁视图 -->
         <section id="unlock-view" class="view">
+            <header style="background:none; border:none; position:absolute; top:0; right:0; width:auto;">
+                <button class="icon-btn theme-toggle-btn" title="切换主题">🌓</button>
+            </header>
             <div class="logo-container">
                 <span class="icon-shield">🔒</span>
-                <h1 class="welcome-text">欢迎回来</h1>
+                <h1 class="welcome-text">验证身份</h1>
             </div>
             <div class="input-group">
-                <label>输入主密码</label>
-                <input type="password" id="master-password" placeholder="••••••••">
+                <label>请输入你的解锁密码</label>
+                <input type="password" id="master-password" placeholder="你的专属密码...">
                 <div id="unlock-error" class="error-text hidden"></div>
             </div>
-            <button id="unlock-btn" class="primary-btn">解锁保险库</button>
+            <button id="unlock-btn" class="primary-btn">立即进入</button>
         </section>
 
         <!-- 主仪表盘视图 -->
         <section id="main-view" class="view hidden">
             <header>
-                <span class="brand">密码管家</span>
+                <div class="header-search">
+                    <input type="text" id="search-input" placeholder="搜索网址、账号或备注...">
+                    <button id="clear-search-btn" class="clear-btn hidden" title="清空搜索">✕</button>
+                </div>
                 <div class="header-right">
+                    <button class="icon-btn theme-toggle-btn" title="切换主题">🌓</button>
                     <button id="nav-add-btn" class="icon-btn">＋</button>
                     <button id="nav-settings-btn" class="icon-btn">⚙️</button>
                 </div>
             </header>
             
-            <div class="search-bar">
-                <input type="text" id="search-input" placeholder="搜索网址、账号或备注...">
-            </div>
-
             <div class="content-scroll">
                 <div id="current-site-section" class="section">
                     <div class="section-header">
                         <span class="indicator active"></span>
                         <h2 id="current-site-title" class="section-title">当前网站</h2>
+                        <span id="current-count" class="count-badge">0</span>
                     </div>
                     <div id="current-site-list" class="account-list"></div>
                 </div>
@@ -48,7 +52,8 @@
                 <div id="all-accounts-section" class="section">
                     <div class="section-header">
                         <span class="indicator"></span>
-                        <h2 class="section-title">所有账号</h2>
+                        <h2 class="section-title">我的账号库</h2>
+                        <span id="all-count" class="count-badge">0</span>
                     </div>
                     <div id="all-accounts-list" class="account-list"></div>
                 </div>
@@ -59,13 +64,13 @@
         <section id="add-view" class="view hidden">
             <header>
                 <button id="add-back-btn" class="icon-btn">←</button>
-                <span class="view-title">添加新账号</span>
+                <div class="view-title">记录新账号</div>
                 <button id="save-account-btn" class="save-btn">保存</button>
             </header>
             <div class="form-container">
                 <div class="input-group">
-                    <label>网站域名</label>
-                    <input type="text" id="add-url" placeholder="example.com">
+                    <label>网址</label>
+                    <input type="text" id="add-url" placeholder="https://...">
                 </div>
                 <div class="input-group">
                     <label>用户名 / 账号</label>
@@ -116,13 +121,26 @@
 
                 <div class="settings-group">
                     <div class="group-title">安全选项</div>
+                    <div class="settings-item" style="cursor: default; justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <span class="item-icon">⏱️</span>
+                            <span class="item-label">自动锁定时间</span>
+                        </div>
+                        <select id="lock-timeout-select" class="mini-select">
+                            <option value="0">立即锁定</option>
+                            <option value="1">1 分钟后</option>
+                            <option value="5" selected>5 分钟后</option>
+                            <option value="30">30 分钟后</option>
+                            <option value="1440">24 小时后</option>
+                        </select>
+                    </div>
                     <button id="lock-vault-btn" class="settings-item">
                         <span class="item-icon">🔒</span>
-                        <span class="item-label">立即锁定保险库</span>
+                        <span class="item-label">立即退出并锁定</span>
                     </button>
                     <button id="reset-vault-btn" class="settings-item danger">
                         <span class="item-icon">⚠️</span>
-                        <span class="item-label">清除所有数据</span>
+                        <span class="item-label">清空全部账号数据</span>
                     </button>
                 </div>
 
