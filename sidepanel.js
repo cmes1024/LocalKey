@@ -307,6 +307,18 @@ function renderVault(filter = '') {
     }
 }
 
+// 显示轻量级通知
+function showToast(message) {
+    const toast = document.createElement('div');
+    toast.className = 'toast-notification';
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => {
+        toast.classList.add('fade-out');
+        setTimeout(() => toast.remove(), 300);
+    }, 2000);
+}
+
 async function handleFill(item) {
     try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
