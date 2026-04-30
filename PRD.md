@@ -1,4 +1,4 @@
-# 🔒 Chrome 密码管家 (Local-First Password Manager) 产品需求文档 (PRD)
+# 🔒 LocalKey (Local-First Password Manager) 产品需求文档 (PRD)
 
 ## 一、 产品愿景与定位
 一款基于 Chrome Manifest V3 标准开发的**纯本地、零知识架构**的密码管理插件。摒弃传统的 Popup 弹窗，采用**全局侧边栏 (Side Panel)** 交互设计，主打“伴随式”的安全密码管理体验。所有数据加密存储在本地，绝不上传云端，将数据主权完全交还给用户。

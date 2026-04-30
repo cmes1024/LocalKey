@@ -1,4 +1,4 @@
-# 🎨 Chrome 密码管家 UI/UX 交互设计指南 (给 UI 绘制人员/工具的 Prompt)
+# 🎨 LocalKey UI/UX 交互设计指南 (给 UI 绘制人员/工具的 Prompt)
 
 这份文档旨在为 UI 绘制阶段（无论是提供给人类设计师还是 AI 绘图工具如 Pencil/Midjourney 等）提供详尽的页面结构、组件清单和交互状态说明。
 
