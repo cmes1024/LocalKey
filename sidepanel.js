@@ -147,18 +147,30 @@ function initEventListeners() {
     document.getElementById('lock-vault-btn').addEventListener('click', handleLock);
     document.getElementById('reset-vault-btn').addEventListener('click', handleReset);
     
-    // ⚡ 快捷填充设置开关
+    // ⚡ 快捷填充与快捷键设置开关
     const quickFillToggle = document.getElementById('quick-fill-toggle');
+    const hotkeyToggle = document.getElementById('hotkey-toggle');
+    
     chrome.storage.local.get(['settings'], (result) => {
         if (result.settings) {
             quickFillToggle.checked = result.settings.enableQuickFill !== false;
+            hotkeyToggle.checked = result.settings.enableHotkeys !== false;
         }
     });
+
     quickFillToggle.addEventListener('change', async (e) => {
         const { settings = {} } = await chrome.storage.local.get(['settings']);
         settings.enableQuickFill = e.target.checked;
         await chrome.storage.local.set({ settings });
         showToast(`快捷显示已${e.target.checked ? '开启' : '关闭'}`);
+    });
+
+    hotkeyToggle.addEventListener('change', async (e) => {
+        const { settings = {} } = await chrome.storage.local.get(['settings']);
+        settings.enableHotkeys = e.target.checked;
+        await chrome.storage.local.set({ settings });
+        showToast(`快捷键填充已${e.target.checked ? '开启' : '关闭'}`);
+        renderVault(); // 刷新以显示/隐藏角标
     });
     
     document.getElementById('copy-template-btn').addEventListener('click', () => {
@@ -178,6 +190,22 @@ function initEventListeners() {
 
     chrome.tabs.onActivated.addListener(updateCurrentTabInfo);
     chrome.tabs.onUpdated.addListener((id, info) => info.url && updateCurrentTabInfo());
+
+    // ⚡ 全局快捷键监听 (Alt + 1-9)
+    window.addEventListener('keydown', async (e) => {
+        if (e.altKey && e.key >= '1' && e.key <= '9') {
+            const { settings } = await chrome.storage.local.get(['settings']);
+            if (settings && settings.enableHotkeys === false) return;
+            
+            const index = parseInt(e.key) - 1;
+            const currentList = document.getElementById('current-site-list');
+            const cards = currentList.querySelectorAll('.account-card');
+            if (cards[index]) {
+                const fillBtn = cards[index].querySelector('.main-fill');
+                if (fillBtn) fillBtn.click();
+            }
+        }
+    });
 }
 
 async function handleUnlock() {
@@ -263,20 +291,77 @@ function handleImport(e) {
     reader.onload = async (event) => {
         try {
             const importedVault = JSON.parse(event.target.result);
-            if (!Array.isArray(importedVault)) throw new Error('Format Error');
-            if (confirm(`检测到 ${importedVault.length} 条记录，确定合并吗？`)) {
+            if (!Array.isArray(importedVault)) throw new Error('格式错误：导入文件必须是 JSON 数组');
+            
+            if (confirm(`检测到 ${importedVault.length} 条记录，确定开始合并导入吗？`)) {
                 const result = await chrome.storage.local.get(['vault']);
                 let currentVault = result.vault || [];
+                
+                let successCount = 0;
+                let skipCount = 0;
+                let errorCount = 0;
+
+                // 预处理当前已有的账号用于去重对比 (使用 state.vault，它是解密后的)
+                const normalize = (u) => {
+                    try {
+                        const url = new URL(u.startsWith('http') ? u : 'https://' + u);
+                        return (url.hostname + url.pathname).toLowerCase().replace(/\/$/, '').replace(/^www\./, '');
+                    } catch(e) { return u.toLowerCase().trim(); }
+                };
+
                 for (const item of importedVault) {
-                    const encryptedUser = await CryptoUtils.encrypt(item.username, state.masterKey);
-                    const encryptedPass = await CryptoUtils.encrypt(item.password, state.masterKey);
-                    const encryptedNotes = item.notes ? await CryptoUtils.encrypt(item.notes, state.masterKey) : null;
-                    currentVault.push({ id: Date.now() + Math.random(), url: item.url, username: encryptedUser, password: encryptedPass, notes: encryptedNotes });
+                    try {
+                        if (!item.url || !item.username || !item.password) {
+                            errorCount++;
+                            continue;
+                        }
+
+                        // 🔍 去重校验：检查 state.vault 中是否已存在相同网址和账号
+                        const isDuplicate = state.vault.some(existing => 
+                            normalize(existing.url) === normalize(item.url) && 
+                            existing.username.trim() === item.username.trim()
+                        );
+
+                        if (isDuplicate) {
+                            skipCount++;
+                            continue;
+                        }
+
+                        // 执行加密并存入
+                        const encryptedUser = await CryptoUtils.encrypt(item.username, state.masterKey);
+                        const encryptedPass = await CryptoUtils.encrypt(item.password, state.masterKey);
+                        const encryptedNotes = item.notes ? await CryptoUtils.encrypt(item.notes, state.masterKey) : null;
+                        
+                        currentVault.push({ 
+                            id: Date.now() + Math.random(), 
+                            url: item.url, 
+                            username: encryptedUser, 
+                            password: encryptedPass, 
+                            notes: encryptedNotes 
+                        });
+                        successCount++;
+                    } catch (err) {
+                        console.error('单条记录导入失败:', err);
+                        errorCount++;
+                    }
                 }
+
                 await chrome.storage.local.set({ vault: currentVault });
-                alert('导入成功！'); await loadVault(); showView('main');
+                
+                // 最终结果提示
+                let report = `导入完成！\n\n✅ 成功新增: ${successCount} 条`;
+                if (skipCount > 0) report += `\n⏭️ 自动跳过 (重复): ${skipCount} 条`;
+                if (errorCount > 0) report += `\n❌ 导入失败 (格式错): ${errorCount} 条`;
+                
+                alert(report);
+                await loadVault(); 
+                showView('main');
             }
-        } catch (err) { alert('导入失败'); }
+        } catch (err) { 
+            alert('导入失败：' + err.message); 
+        } finally {
+            e.target.value = ''; // 重置 input 方便下次选择
+        }
     };
     reader.readAsText(file);
 }
@@ -308,7 +393,10 @@ function renderVault(filter = '') {
         if (searchTerm && !matchesUrl && !matchesUser && !matchesNotes) return;
         
         matchCount++;
+        
+        // 🚀 恢复侧边栏匹配逻辑：基于域名包含匹配 (保持用户习惯)
         const isCurrentSite = item.url.includes(state.currentUrl) && state.currentUrl !== '';
+
         const parts = splitUrl(item.url);
         
         // 使用 Chrome 内置的 Favicon 解析服务 (最稳定、最原生)
@@ -339,7 +427,17 @@ function renderVault(filter = '') {
                 ${item.notes ? `<div class="note-box">备注: ${item.notes}</div>` : ''}
             </div>
             <div class="card-action-bar">
-                <button class="bar-btn fill-btn main-fill">⚡ 快速填充</button>
+                <button class="bar-btn fill-btn main-fill">
+                    ⚡ 快速填充
+                    ${(() => {
+                        // 异步获取设置同步比较难，这里通过 DOM 状态或重新读取
+                        const hotkeyToggle = document.getElementById('hotkey-toggle');
+                        const showBadge = hotkeyToggle ? hotkeyToggle.checked : true;
+                        return (showBadge && isCurrentSite && !searchTerm && currentCount < 9) 
+                            ? `<span class="shortcut-badge">Alt+${currentCount + 1}</span>` 
+                            : '';
+                    })()}
+                </button>
                 <div class="side-actions">
                     <button class="bar-btn edit-btn" title="编辑">✏️</button>
                     <button class="bar-btn delete-btn" title="删除">🗑️</button>
@@ -467,7 +565,8 @@ async function updateCurrentTabInfo() {
         const [t] = await chrome.tabs.query({ active: true, currentWindow: true }); 
         if (t && t.url && t.url.startsWith('http')) { 
             const u = new URL(t.url); 
-            state.currentUrl = u.hostname.replace('www.', ''); 
+            state.currentUrl = u.hostname.replace('www.', '').toLowerCase(); 
+            state.currentPath = u.pathname.toLowerCase().replace(/\/$/, '');
             // 🚀 获取不带参数的完整路径
             state.fullUrlWithoutParams = u.origin + u.pathname;
             if (state.isUnlocked) renderVault(); 

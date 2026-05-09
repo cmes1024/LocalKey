@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "密码管家",
-  "version": "1.1.0",
+  "version": "1.1.2",
   "description": "本地加密、隐私优先的现代密码管理插件",
   "permissions": [
     "sidePanel",

@@ -18,6 +18,7 @@
             const { settings } = await chrome.storage.local.get(['settings']);
             const session = await chrome.storage.session.get(['sessionKey']);
             const quickFillEnabled = settings ? (settings.enableQuickFill !== false) : true;
+            const hotkeysEnabled = settings ? (settings.enableHotkeys !== false) : true;
             
             if (!quickFillEnabled || !session.sessionKey) {
                 if (root) { root.remove(); lastDataHash = ''; }
@@ -30,29 +31,38 @@
                 return;
             }
 
-            // 🚀 核心改进：精准匹配逻辑
+            // 🚀 核心匹配逻辑：只对域名和路径进行匹配，完全忽略 URL 参数 (?...)
             const currentHost = window.location.hostname.replace('www.', '').toLowerCase();
-            const currentPath = window.location.pathname.toLowerCase();
+            // 归一化路径：去掉末尾斜杠
+            const currentPath = window.location.pathname.toLowerCase().replace(/\/$/, '');
 
             const matches = vault.filter(item => {
                 if (!item.url) return false;
                 
-                // 解析配置的 URL
-                // 去掉协议和 www，提取主机名和路径
-                const cleanUrl = item.url.replace(/^(https?:\/\/)?(www\.)?/, '').toLowerCase();
-                const [itemHost, ...pathParts] = cleanUrl.split('/');
-                const itemPath = '/' + pathParts.join('/');
+                try {
+                    // 归一化存储的 URL：去掉协议和 www
+                    let urlToParse = item.url.trim();
+                    if (!urlToParse.match(/^[a-zA-Z]+:\/\//)) urlToParse = 'https://' + urlToParse;
+                    const u = new URL(urlToParse);
+                    
+                    const itemHost = u.hostname.replace('www.', '').toLowerCase();
+                    const itemPath = u.pathname.toLowerCase().replace(/\/$/, '');
 
-                // 1. 域名校验：当前域名必须包含配置的域名（或反之）
-                const hostMatch = currentHost.includes(itemHost) || itemHost.includes(currentHost);
-                if (!hostMatch) return false;
+                    // 1. 域名校验
+                    const hostMatch = currentHost === itemHost || currentHost.endsWith('.' + itemHost);
+                    if (!hostMatch) return false;
 
-                // 2. 路径校验：如果配置了具体路径（非根目录 /），则当前路径必须包含配置路径
-                if (itemPath && itemPath !== '/') {
-                    return currentPath.includes(itemPath);
+                    // 2. 路径校验：如果配置了具体路径（非根目录），则当前路径必须匹配该路径
+                    if (itemPath && itemPath !== '' && itemPath !== '/') {
+                        // 当前路径必须完全匹配或作为父级路径匹配
+                        return currentPath === itemPath || currentPath.startsWith(itemPath + '/');
+                    }
+
+                    return true; 
+                } catch (e) {
+                    // 如果 URL 格式不规范，尝试简单的包含匹配
+                    return item.url.toLowerCase().includes(currentHost);
                 }
-
-                return true; // 默认域名匹配即通过
             });
 
             if (matches.length === 0) {
@@ -60,17 +70,35 @@
                 return;
             }
 
-            const currentHash = matches.length + '-' + matches.map(m => m.username.cipher.substring(0, 10)).join('|');
+            const currentHash = matches.length + '-' + hotkeysEnabled + '-' + matches.map(m => m.username.cipher.substring(0, 10)).join('|');
 
             if (!root || lastDataHash !== currentHash) {
                 lastDataHash = currentHash;
                 if (root) root.remove();
-                renderUI(matches, session.sessionKey);
+                renderUI(matches, session.sessionKey, hotkeysEnabled);
             }
         } catch (e) {}
     }, 1000);
 
-    async function renderUI(matches, sessionKey) {
+    // ⚡ 注册键盘快捷键监听 (Alt + 1-9)
+    window.addEventListener('keydown', async (e) => {
+        if (e.altKey && e.key >= '1' && e.key <= '9') {
+            const { settings } = await chrome.storage.local.get(['settings']);
+            if (settings && settings.enableHotkeys === false) return;
+
+            const index = parseInt(e.key) - 1;
+            const root = document.getElementById('lk-root');
+            if (root) {
+                const items = root.querySelectorAll('.lk-drawer-item');
+                if (items[index]) {
+                    const fillBtn = items[index].querySelector('.lk-fill-trigger');
+                    if (fillBtn) fillBtn.click();
+                }
+            }
+        }
+    });
+
+    async function renderUI(matches, sessionKey, hotkeysEnabled) {
         try {
             let keyData = Array.isArray(sessionKey) ? new Uint8Array(sessionKey) : Uint8Array.from(atob(sessionKey), c => c.charCodeAt(0));
             const cryptoKey = await crypto.subtle.importKey("raw", keyData, "AES-GCM", true, ["decrypt"]);
@@ -83,10 +111,10 @@
                 align-items: flex-end; pointer-events: none;
             `;
 
-            for (const item of matches) {
+            matches.forEach(async (item, idx) => {
                 const username = await CryptoUtils.decrypt(item.username.cipher, item.username.iv, cryptoKey);
                 const password = await CryptoUtils.decrypt(item.password.cipher, item.password.iv, cryptoKey);
-                if (!username) continue;
+                if (!username) return;
 
                 const drawerItem = document.createElement('div');
                 drawerItem.className = 'lk-drawer-item';
@@ -121,20 +149,26 @@
                 left.style.cssText = `
                     width: 35px; height: 100%; display: flex; align-items: center; justify-content: center;
                     background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-                    color: white; font-size: 14px; font-weight: 900; flex-shrink: 0;
-                    border-radius: 8px 0 0 8px;
+                    color: white; font-size: 13px; font-weight: 900; flex-shrink: 0;
+                    border-radius: 8px 0 0 8px; position: relative;
                 `;
-                left.innerText = username.charAt(0).toUpperCase();
+                // 🚀 显示序号以便使用快捷键 (如果开启了快捷键设置)
+                left.innerText = (hotkeysEnabled && idx < 9) ? (idx + 1) : username.charAt(0).toUpperCase();
+                
                 left.onmouseenter = () => { tooltip.innerText = username; tooltip.style.opacity = '1'; tooltip.style.right = '85px'; };
                 left.onmouseleave = () => { tooltip.style.opacity = '0'; tooltip.style.right = '80px'; };
 
                 const right = document.createElement('div');
+                right.className = 'lk-fill-trigger';
                 right.style.cssText = `
                     width: 35px; height: 100%; display: flex; align-items: center; justify-content: center;
                     color: rgba(255,255,255,0.6); flex-shrink: 0;
                 `;
                 right.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>';
-                right.onmouseenter = () => { tooltip.innerText = '快速填充'; tooltip.style.opacity = '1'; tooltip.style.right = '85px'; };
+                right.onmouseenter = () => { 
+                    tooltip.innerText = hotkeysEnabled ? `快速填充 (Alt+${idx+1})` : '快速填充'; 
+                    tooltip.style.opacity = '1'; tooltip.style.right = '85px'; 
+                };
                 right.onmouseleave = () => { tooltip.style.opacity = '0'; tooltip.style.right = '80px'; };
 
                 container.appendChild(left);
@@ -165,7 +199,7 @@
                 };
 
                 root.appendChild(drawerItem);
-            }
+            });
             document.body.appendChild(root);
         } catch (e) {}
     }
