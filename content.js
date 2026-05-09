@@ -1,11 +1,10 @@
 /**
- * LocalKey QuickFill - 智能内容感知 & 易读版
+ * LocalKey QuickFill - 精准路径匹配版
  */
 
 (function() {
     let lastDataHash = '';
 
-    // 响应侧边栏快速填充指令
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (request.type === 'FILL_FORM') {
             fillFields(request.data.username, request.data.password);
@@ -13,7 +12,6 @@
         }
     });
 
-    // 定时轮询状态与内容变化
     setInterval(async () => {
         try {
             const root = document.getElementById('lk-root');
@@ -32,11 +30,29 @@
                 return;
             }
 
+            // 🚀 核心改进：精准匹配逻辑
             const currentHost = window.location.hostname.replace('www.', '').toLowerCase();
+            const currentPath = window.location.pathname.toLowerCase();
+
             const matches = vault.filter(item => {
                 if (!item.url) return false;
-                const itemHost = item.url.replace(/^(https?:\/\/)?(www\.)?/, '').split('/')[0].split(':')[0].toLowerCase();
-                return currentHost.includes(itemHost) || itemHost.includes(currentHost);
+                
+                // 解析配置的 URL
+                // 去掉协议和 www，提取主机名和路径
+                const cleanUrl = item.url.replace(/^(https?:\/\/)?(www\.)?/, '').toLowerCase();
+                const [itemHost, ...pathParts] = cleanUrl.split('/');
+                const itemPath = '/' + pathParts.join('/');
+
+                // 1. 域名校验：当前域名必须包含配置的域名（或反之）
+                const hostMatch = currentHost.includes(itemHost) || itemHost.includes(currentHost);
+                if (!hostMatch) return false;
+
+                // 2. 路径校验：如果配置了具体路径（非根目录 /），则当前路径必须包含配置路径
+                if (itemPath && itemPath !== '/') {
+                    return currentPath.includes(itemPath);
+                }
+
+                return true; // 默认域名匹配即通过
             });
 
             if (matches.length === 0) {
@@ -44,7 +60,6 @@
                 return;
             }
 
-            // 数据指纹，用于检测内容编辑
             const currentHash = matches.length + '-' + matches.map(m => m.username.cipher.substring(0, 10)).join('|');
 
             if (!root || lastDataHash !== currentHash) {
@@ -126,7 +141,6 @@
                 container.appendChild(right);
                 drawerItem.appendChild(container);
 
-                // 交互动画
                 drawerItem.onmouseenter = () => {
                     drawerItem.style.right = '0px';
                     container.style.boxShadow = '-5px 5px 15px rgba(99, 102, 241, 0.2)';
