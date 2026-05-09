@@ -17,7 +17,12 @@ const views = {
     settings: document.getElementById('settings-view')
 };
 
+// 初始化
 document.addEventListener('DOMContentLoaded', async () => {
+    // 允许 content.js 访问 session storage 获取密钥
+    if (chrome.storage.session.setAccessLevel) {
+        chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' });
+    }
     await initTheme(); // 🚀 初始化主题
     await checkInitialState();
     initEventListeners();
@@ -64,8 +69,14 @@ async function checkInitialState() {
 
         if (timeoutMin > 0 && diff < timeoutMin) {
             try {
-                // 恢复密钥
-                const keyData = new Uint8Array(atob(session.sessionKey).split('').map(c => c.charCodeAt(0)));
+                // 恢复密钥 (兼容数组格式)
+                let keyData;
+                if (Array.isArray(session.sessionKey)) {
+                    keyData = new Uint8Array(session.sessionKey);
+                } else {
+                    keyData = new Uint8Array(atob(session.sessionKey).split('').map(c => c.charCodeAt(0)));
+                }
+                
                 state.masterKey = await crypto.subtle.importKey(
                     "raw", keyData, "AES-GCM", true, ["encrypt", "decrypt"]
                 );
@@ -136,6 +147,20 @@ function initEventListeners() {
     document.getElementById('lock-vault-btn').addEventListener('click', handleLock);
     document.getElementById('reset-vault-btn').addEventListener('click', handleReset);
     
+    // ⚡ 快捷填充设置开关
+    const quickFillToggle = document.getElementById('quick-fill-toggle');
+    chrome.storage.local.get(['settings'], (result) => {
+        if (result.settings) {
+            quickFillToggle.checked = result.settings.enableQuickFill !== false;
+        }
+    });
+    quickFillToggle.addEventListener('change', async (e) => {
+        const { settings = {} } = await chrome.storage.local.get(['settings']);
+        settings.enableQuickFill = e.target.checked;
+        await chrome.storage.local.set({ settings });
+        showToast(`快捷显示已${e.target.checked ? '开启' : '关闭'}`);
+    });
+    
     document.getElementById('copy-template-btn').addEventListener('click', () => {
         const template = [{"url": "https://example.com", "username": "your_username", "password": "your_password", "notes": "optional"}];
         navigator.clipboard.writeText(JSON.stringify(template, null, 2));
@@ -170,11 +195,10 @@ async function handleUnlock() {
             state.masterKey = await CryptoUtils.deriveKey(password, salt);
         }
 
-        // 🚀 核心：将密钥存入 Session 存储
+        // 🚀 核心：将密钥存入 Session 存储 (改用数组格式，杜绝编码乱码)
         const exportedKey = await crypto.subtle.exportKey("raw", state.masterKey);
-        const keyBase64 = btoa(String.fromCharCode(...new Uint8Array(exportedKey)));
         await chrome.storage.session.set({ 
-            sessionKey: keyBase64, 
+            sessionKey: Array.from(new Uint8Array(exportedKey)), 
             lastUnlockedTime: Date.now() 
         });
 
