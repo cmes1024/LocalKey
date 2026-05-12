@@ -84,7 +84,10 @@
     window.addEventListener('keydown', async (e) => {
         if (e.altKey && e.key >= '1' && e.key <= '9') {
             const { settings } = await chrome.storage.local.get(['settings']);
-            if (settings && settings.enableHotkeys === false) return;
+            const quickFillEnabled = settings ? (settings.enableQuickFill !== false) : true;
+            const hotkeysEnabled = settings ? (settings.enableHotkeys !== false) : true;
+            
+            if (!quickFillEnabled || !hotkeysEnabled) return;
 
             const index = parseInt(e.key) - 1;
             const root = document.getElementById('lk-root');
@@ -111,11 +114,16 @@
                 align-items: flex-end; pointer-events: none;
             `;
 
-            matches.forEach(async (item, idx) => {
-                const username = await CryptoUtils.decrypt(item.username.cipher, item.username.iv, cryptoKey);
-                const password = await CryptoUtils.decrypt(item.password.cipher, item.password.iv, cryptoKey);
-                if (!username) return;
+            // 🚀 并行解密所有匹配项，确保渲染顺序正确
+            const decryptedItems = await Promise.all(matches.map(async (item) => {
+                try {
+                    const username = await CryptoUtils.decrypt(item.username.cipher, item.username.iv, cryptoKey);
+                    const password = await CryptoUtils.decrypt(item.password.cipher, item.password.iv, cryptoKey);
+                    return { ...item, username: username, password: password };
+                } catch (e) { return null; }
+            }));
 
+            decryptedItems.filter(i => i && i.username).forEach((item, idx) => {
                 const drawerItem = document.createElement('div');
                 drawerItem.className = 'lk-drawer-item';
                 drawerItem.style.cssText = `
@@ -149,13 +157,25 @@
                 left.style.cssText = `
                     width: 35px; height: 100%; display: flex; align-items: center; justify-content: center;
                     background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-                    color: white; font-size: 13px; font-weight: 900; flex-shrink: 0;
+                    color: white; font-size: 14px; font-weight: 900; flex-shrink: 0;
                     border-radius: 8px 0 0 8px; position: relative;
                 `;
-                // 🚀 显示序号以便使用快捷键 (如果开启了快捷键设置)
-                left.innerText = (hotkeysEnabled && idx < 9) ? (idx + 1) : username.charAt(0).toUpperCase();
                 
-                left.onmouseenter = () => { tooltip.innerText = username; tooltip.style.opacity = '1'; tooltip.style.right = '85px'; };
+                // 🚀 显示账号首字母，如果有快捷键则显示小角标
+                left.innerText = item.username.charAt(0).toUpperCase();
+                if (hotkeysEnabled && idx < 9) {
+                    const badge = document.createElement('div');
+                    badge.style.cssText = `
+                        position: absolute; top: 1px; left: 1px;
+                        font-size: 8px; line-height: 1; padding: 1px 2px;
+                        background: rgba(0,0,0,0.4); border-radius: 2px;
+                        font-weight: 600; color: white; pointer-events: none;
+                    `;
+                    badge.innerText = idx + 1;
+                    left.appendChild(badge);
+                }
+                
+                left.onmouseenter = () => { tooltip.innerText = item.username; tooltip.style.opacity = '1'; tooltip.style.right = '85px'; };
                 left.onmouseleave = () => { tooltip.style.opacity = '0'; tooltip.style.right = '80px'; };
 
                 const right = document.createElement('div');
@@ -192,7 +212,7 @@
                 right.onclick = (e) => {
                     e.stopPropagation();
                     right.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
-                    fillFields(username, password);
+                    fillFields(item.username, item.password);
                     setTimeout(() => {
                         right.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>';
                     }, 1500);
@@ -201,7 +221,7 @@
                 root.appendChild(drawerItem);
             });
             document.body.appendChild(root);
-        } catch (e) {}
+        } catch (e) { console.error('LocalKey UI Render Error:', e); }
     }
 
     function fillFields(user, pass) {

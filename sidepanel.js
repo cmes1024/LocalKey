@@ -156,12 +156,24 @@ function initEventListeners() {
             quickFillToggle.checked = result.settings.enableQuickFill !== false;
             hotkeyToggle.checked = result.settings.enableHotkeys !== false;
         }
+        syncHotkeyToggleState();
     });
+
+    function syncHotkeyToggleState() {
+        const isQuickFillEnabled = quickFillToggle.checked;
+        hotkeyToggle.disabled = !isQuickFillEnabled;
+        const parent = hotkeyToggle.closest('.settings-item');
+        if (parent) {
+            parent.style.opacity = isQuickFillEnabled ? '1' : '0.5';
+            parent.style.filter = isQuickFillEnabled ? 'none' : 'grayscale(0.5)';
+        }
+    }
 
     quickFillToggle.addEventListener('change', async (e) => {
         const { settings = {} } = await chrome.storage.local.get(['settings']);
         settings.enableQuickFill = e.target.checked;
         await chrome.storage.local.set({ settings });
+        syncHotkeyToggleState();
         showToast(`快捷显示已${e.target.checked ? '开启' : '关闭'}`);
     });
 
@@ -195,7 +207,10 @@ function initEventListeners() {
     window.addEventListener('keydown', async (e) => {
         if (e.altKey && e.key >= '1' && e.key <= '9') {
             const { settings } = await chrome.storage.local.get(['settings']);
-            if (settings && settings.enableHotkeys === false) return;
+            const quickFillEnabled = settings ? (settings.enableQuickFill !== false) : true;
+            const hotkeysEnabled = settings ? (settings.enableHotkeys !== false) : true;
+            
+            if (!quickFillEnabled || !hotkeysEnabled) return;
             
             const index = parseInt(e.key) - 1;
             const currentList = document.getElementById('current-site-list');
