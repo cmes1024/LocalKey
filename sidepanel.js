@@ -387,7 +387,7 @@ async function handleReset() {
 }
 
 function splitUrl(urlStr) {
-    try { const url = new URL(urlStr); return { host: url.hostname.replace('www.', ''), path: url.pathname === '/' ? '' : url.pathname, query: url.search }; }
+    try { const url = new URL(urlStr); return { host: url.hostname.replace(/^www\./, ''), path: url.pathname === '/' ? '' : url.pathname, query: url.search }; }
     catch (e) { const parts = urlStr.replace('https://', '').replace('http://', '').split('/'); return { host: parts[0], path: parts.length > 1 ? '/' + parts.slice(1).join('/') : '', query: '' }; }
 }
 
@@ -409,8 +409,33 @@ function renderVault(filter = '') {
         
         matchCount++;
         
-        // 🚀 恢复侧边栏匹配逻辑：基于域名包含匹配 (保持用户习惯)
-        const isCurrentSite = item.url.includes(state.currentUrl) && state.currentUrl !== '';
+        // 🚀 核心匹配逻辑：彻底忽略协议 (http/https) 和端口，精确匹配域名和路径
+        let isCurrentSite = false;
+        if (state.currentUrl !== '') {
+            try {
+                let urlToParse = item.url.trim();
+                if (!urlToParse.match(/^[a-zA-Z]+:\/\//)) urlToParse = 'https://' + urlToParse;
+                const u = new URL(urlToParse);
+                const itemHost = u.hostname.replace(/^www\./, '').toLowerCase();
+                const itemPath = u.pathname.toLowerCase().replace(/\/$/, '');
+                
+                // 1. 域名校验: 精确匹配或子域名匹配
+                const hostMatch = state.currentUrl === itemHost || state.currentUrl.endsWith('.' + itemHost);
+                if (hostMatch) {
+                    // 2. 路径校验：如果配置了具体路径（非根目录），则当前路径必须匹配该路径
+                    if (itemPath && itemPath !== '' && itemPath !== '/') {
+                        isCurrentSite = state.currentPath === itemPath || state.currentPath.startsWith(itemPath + '/');
+                    } else {
+                        isCurrentSite = true;
+                    }
+                }
+            } catch(e) {
+                // 如果 URL 格式不规范，尝试简单的包含匹配，并忽略 http/https 差异
+                const cleanItemUrl = item.url.toLowerCase().replace(/^https?:\/\//, '');
+                const cleanCurrentHost = state.currentUrl.replace(/^https?:\/\//, '');
+                isCurrentSite = cleanItemUrl.includes(cleanCurrentHost);
+            }
+        }
 
         const parts = splitUrl(item.url);
         
@@ -580,7 +605,7 @@ async function updateCurrentTabInfo() {
         const [t] = await chrome.tabs.query({ active: true, currentWindow: true }); 
         if (t && t.url && t.url.startsWith('http')) { 
             const u = new URL(t.url); 
-            state.currentUrl = u.hostname.replace('www.', '').toLowerCase(); 
+            state.currentUrl = u.hostname.replace(/^www\./, '').toLowerCase(); 
             state.currentPath = u.pathname.toLowerCase().replace(/\/$/, '');
             // 🚀 获取不带参数的完整路径
             state.fullUrlWithoutParams = u.origin + u.pathname;

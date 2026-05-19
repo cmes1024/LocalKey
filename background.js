@@ -29,6 +29,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleGetMatchingAccounts(message.url, sendResponse);
     return true; // 异步响应
   }
+  if (message.type === 'DECRYPT_ITEMS') {
+    handleDecryptItems(message.items, message.sessionKey, sendResponse);
+    return true;
+  }
 });
 
 /**
@@ -119,6 +123,28 @@ async function handleGetMatchingAccounts(urlStr, sendResponse) {
     sendResponse({ status: 'success', accounts: matches });
   } catch (error) {
     console.error('handleGetMatchingAccounts error:', error);
+    sendResponse({ status: 'error', message: error.message });
+  }
+}
+
+/**
+ * 委托解密（处理 HTTP 页面无法使用 crypto.subtle 的情况）
+ */
+async function handleDecryptItems(items, sessionKey, sendResponse) {
+  try {
+    let keyData = Array.isArray(sessionKey) ? new Uint8Array(sessionKey) : Uint8Array.from(atob(sessionKey), c => c.charCodeAt(0));
+    const cryptoKey = await crypto.subtle.importKey("raw", keyData, "AES-GCM", true, ["decrypt"]);
+
+    const decryptedItems = await Promise.all(items.map(async (item) => {
+      try {
+        const username = await self.CryptoUtils.decrypt(item.username.cipher, item.username.iv, cryptoKey);
+        const password = await self.CryptoUtils.decrypt(item.password.cipher, item.password.iv, cryptoKey);
+        return { ...item, username, password };
+      } catch (e) { return null; }
+    }));
+    sendResponse({ status: 'success', items: decryptedItems.filter(i => i !== null) });
+  } catch (error) {
+    console.error('handleDecryptItems error:', error);
     sendResponse({ status: 'error', message: error.message });
   }
 }

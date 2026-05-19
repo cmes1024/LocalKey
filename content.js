@@ -31,11 +31,10 @@
                 return;
             }
 
-            // 🚀 核心匹配逻辑：只对域名和路径进行匹配，完全忽略 URL 参数 (?...)
-            const currentHost = window.location.hostname.replace('www.', '').toLowerCase();
-            // 归一化路径：去掉末尾斜杠
+            // 🚀 核心匹配逻辑：彻底忽略协议 (http/https) 和端口，精确匹配域名和路径
+            const currentHost = window.location.hostname.replace(/^www\./, '').toLowerCase();
             const currentPath = window.location.pathname.toLowerCase().replace(/\/$/, '');
-
+            
             const matches = vault.filter(item => {
                 if (!item.url) return false;
                 
@@ -45,10 +44,10 @@
                     if (!urlToParse.match(/^[a-zA-Z]+:\/\//)) urlToParse = 'https://' + urlToParse;
                     const u = new URL(urlToParse);
                     
-                    const itemHost = u.hostname.replace('www.', '').toLowerCase();
+                    const itemHost = u.hostname.replace(/^www\./, '').toLowerCase();
                     const itemPath = u.pathname.toLowerCase().replace(/\/$/, '');
 
-                    // 1. 域名校验
+                    // 1. 域名校验: 精确匹配或子域名匹配
                     const hostMatch = currentHost === itemHost || currentHost.endsWith('.' + itemHost);
                     if (!hostMatch) return false;
 
@@ -60,8 +59,10 @@
 
                     return true; 
                 } catch (e) {
-                    // 如果 URL 格式不规范，尝试简单的包含匹配
-                    return item.url.toLowerCase().includes(currentHost);
+                    // 如果 URL 格式不规范，尝试简单的包含匹配，并忽略 http/https 差异
+                    const cleanItemUrl = item.url.toLowerCase().replace(/^https?:\/\//, '');
+                    const cleanCurrentHost = currentHost.replace(/^https?:\/\//, '');
+                    return cleanItemUrl.includes(cleanCurrentHost);
                 }
             });
 
@@ -103,8 +104,34 @@
 
     async function renderUI(matches, sessionKey, hotkeysEnabled) {
         try {
-            let keyData = Array.isArray(sessionKey) ? new Uint8Array(sessionKey) : Uint8Array.from(atob(sessionKey), c => c.charCodeAt(0));
-            const cryptoKey = await crypto.subtle.importKey("raw", keyData, "AES-GCM", true, ["decrypt"]);
+            let decryptedItems = [];
+
+            // 🚀 检查当前环境是否支持 Web Crypto API (HTTP 页面不支持)
+            if (window.crypto && window.crypto.subtle) {
+                let keyData = Array.isArray(sessionKey) ? new Uint8Array(sessionKey) : Uint8Array.from(atob(sessionKey), c => c.charCodeAt(0));
+                const cryptoKey = await crypto.subtle.importKey("raw", keyData, "AES-GCM", true, ["decrypt"]);
+
+                decryptedItems = await Promise.all(matches.map(async (item) => {
+                    try {
+                        const username = await CryptoUtils.decrypt(item.username.cipher, item.username.iv, cryptoKey);
+                        const password = await CryptoUtils.decrypt(item.password.cipher, item.password.iv, cryptoKey);
+                        return { ...item, username: username, password: password };
+                    } catch (e) { return null; }
+                }));
+            } else {
+                // 委托 background.js 进行解密
+                const response = await chrome.runtime.sendMessage({
+                    type: 'DECRYPT_ITEMS',
+                    items: matches,
+                    sessionKey: sessionKey
+                });
+                if (response && response.status === 'success') {
+                    decryptedItems = response.items;
+                } else {
+                    console.error('LocalKey UI Render Error: Background decryption failed');
+                    return;
+                }
+            }
 
             const root = document.createElement('div');
             root.id = 'lk-root';
@@ -113,15 +140,6 @@
                 z-index: 2147483647; display: flex; flex-direction: column; gap: 8px;
                 align-items: flex-end; pointer-events: none;
             `;
-
-            // 🚀 并行解密所有匹配项，确保渲染顺序正确
-            const decryptedItems = await Promise.all(matches.map(async (item) => {
-                try {
-                    const username = await CryptoUtils.decrypt(item.username.cipher, item.username.iv, cryptoKey);
-                    const password = await CryptoUtils.decrypt(item.password.cipher, item.password.iv, cryptoKey);
-                    return { ...item, username: username, password: password };
-                } catch (e) { return null; }
-            }));
 
             decryptedItems.filter(i => i && i.username).forEach((item, idx) => {
                 const drawerItem = document.createElement('div');
