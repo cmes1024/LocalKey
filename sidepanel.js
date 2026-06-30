@@ -186,7 +186,7 @@ function initEventListeners() {
     });
     
     document.getElementById('copy-template-btn').addEventListener('click', () => {
-        const template = [{"url": "https://example.com", "username": "your_username", "password": "your_password", "notes": "optional"}];
+        const template = [{"url": "https://example.com", "username": "your_username", "password": "your_password", "loginType": "password", "notes": "optional"}];
         navigator.clipboard.writeText(JSON.stringify(template, null, 2));
         const btn = document.getElementById('copy-template-btn');
         const oldText = btn.textContent;
@@ -256,9 +256,9 @@ async function loadVault() {
     for (const item of encryptedVault) {
         try {
             const decryptedUser = await CryptoUtils.decrypt(item.username.cipher, item.username.iv, state.masterKey);
-            const decryptedPass = await CryptoUtils.decrypt(item.password.cipher, item.password.iv, state.masterKey);
+            const decryptedPass = item.password ? await CryptoUtils.decrypt(item.password.cipher, item.password.iv, state.masterKey) : '';
             const decryptedNotes = item.notes ? await CryptoUtils.decrypt(item.notes.cipher, item.notes.iv, state.masterKey) : '';
-            state.vault.push({ id: item.id, url: item.url, username: decryptedUser, password: decryptedPass, notes: decryptedNotes });
+            state.vault.push({ id: item.id, url: item.url, username: decryptedUser, password: decryptedPass, notes: decryptedNotes, loginType: item.loginType || (item.password ? 'password' : 'code') });
         } catch (e) {}
     }
     renderVault();
@@ -269,16 +269,16 @@ async function handleSaveAccount() {
     const user = document.getElementById('add-username').value;
     const pass = document.getElementById('add-password').value;
     const notes = document.getElementById('add-notes').value;
-    if (!urlInput || !user || !pass) return showErrorMessage('add-error', '请完整填写');
+    if (!urlInput || !user) return showErrorMessage('add-error', '请填写网址和账号');
     if (!urlInput.match(/^[a-zA-Z]+:\/\//)) urlInput = 'https://' + urlInput;
     try {
         const encryptedUser = await CryptoUtils.encrypt(user, state.masterKey);
-        const encryptedPass = await CryptoUtils.encrypt(pass, state.masterKey);
+        const encryptedPass = pass ? await CryptoUtils.encrypt(pass, state.masterKey) : null;
         const encryptedNotes = notes ? await CryptoUtils.encrypt(notes, state.masterKey) : null;
         const result = await chrome.storage.local.get(['vault']);
         let vault = result.vault || [];
-        if (state.editingId) { vault = vault.map(i => i.id === state.editingId ? { ...i, url: urlInput, username: encryptedUser, password: encryptedPass, notes: encryptedNotes } : i); }
-        else { vault.push({ id: Date.now(), url: urlInput, username: encryptedUser, password: encryptedPass, notes: encryptedNotes }); }
+        if (state.editingId) { vault = vault.map(i => i.id === state.editingId ? { ...i, url: urlInput, username: encryptedUser, password: encryptedPass, notes: encryptedNotes, loginType: pass ? 'password' : 'code' } : i); }
+        else { vault.push({ id: Date.now(), url: urlInput, username: encryptedUser, password: encryptedPass, notes: encryptedNotes, loginType: pass ? 'password' : 'code' }); }
         await chrome.storage.local.set({ vault }); state.editingId = null; await loadVault(); showView('main');
     } catch (e) { showErrorMessage('add-error', '保存失败'); }
 }
@@ -326,7 +326,7 @@ function handleImport(e) {
 
                 for (const item of importedVault) {
                     try {
-                        if (!item.url || !item.username || !item.password) {
+                        if (!item.url || !item.username) {
                             errorCount++;
                             continue;
                         }
@@ -344,7 +344,7 @@ function handleImport(e) {
 
                         // 执行加密并存入
                         const encryptedUser = await CryptoUtils.encrypt(item.username, state.masterKey);
-                        const encryptedPass = await CryptoUtils.encrypt(item.password, state.masterKey);
+                        const encryptedPass = item.password ? await CryptoUtils.encrypt(item.password, state.masterKey) : null;
                         const encryptedNotes = item.notes ? await CryptoUtils.encrypt(item.notes, state.masterKey) : null;
                         
                         currentVault.push({ 
@@ -448,7 +448,7 @@ function renderVault(filter = '') {
         card.innerHTML = `
             <div class="card-top">
                 <img class="site-icon" src="${faviconUrl}" onerror="this.src='icons/icon16.png'">
-                <div class="url-host">${parts.host}</div>
+                <div class="url-host">${parts.host}</div><span class="login-type-badge ${item.loginType === 'code' ? 'code' : 'password'}">${item.loginType === 'code' ? '📱 验证码' : '🔑 密码'}</span>
             </div>
             ${(parts.path || parts.query) ? `
             <div class="url-details">
@@ -463,12 +463,12 @@ function renderVault(filter = '') {
             </div>` : ''}
             <div class="card-body">
                 <p><span class="label-text">账号</span><span class="value-text">${item.username}</span><button class="copy-badge copy-user">复制</button></p>
-                <p><span class="label-text">密码</span><span class="value-text">••••••••</span><button class="copy-badge copy-pass">复制</button></p>
+                <p><span class="label-text">密码</span><span class="value-text">${item.loginType === 'code' ? '（验证码/扫码登录）' : '••••••••'}</span>${item.loginType !== 'code' ? '<button class="copy-badge copy-pass">复制</button>' : ''}</p>
                 ${item.notes ? `<div class="note-box">备注: ${item.notes}</div>` : ''}
             </div>
             <div class="card-action-bar">
                 <button class="bar-btn fill-btn main-fill">
-                    ⚡ 快速填充
+                    ${item.loginType === 'code' ? '📱 填充手机号' : '⚡ 快速填充'}
                     ${(() => {
                         // 异步获取设置同步比较难，这里通过 DOM 状态或重新读取
                         const hotkeyToggle = document.getElementById('hotkey-toggle');
@@ -502,7 +502,7 @@ function renderVault(filter = '') {
             e.stopPropagation(); navigator.clipboard.writeText(item.username);
             const btn = e.target; btn.textContent = '已复制'; setTimeout(() => btn.textContent = '复制', 1500);
         });
-        card.querySelector('.copy-pass').addEventListener('click', (e) => {
+        card.querySelector('.copy-pass')?.addEventListener('click', (e) => {
             e.stopPropagation(); navigator.clipboard.writeText(item.password);
             const btn = e.target; btn.textContent = '已复制'; setTimeout(() => btn.textContent = '复制', 1500);
         });
@@ -566,7 +566,7 @@ async function handleFill(item) {
         
         chrome.tabs.sendMessage(tab.id, {
             type: 'FILL_FORM',
-            data: { username: item.username, password: item.password }
+            data: { username: item.username, password: item.loginType === 'code' ? '' : item.password }
         }, (response) => {
             if (chrome.runtime.lastError) {
                 alert('填充失败：请刷新网页后再试（如果是新安装的插件）');
