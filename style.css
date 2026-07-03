@@ -71,7 +71,7 @@ header { height: 56px; display: flex; justify-content: space-between; align-item
 .site-icon { 
     position: absolute; right: -10px; top: -10px; 
     width: 64px; height: 64px; 
-    opacity: 0.3; /* 稍微再调淡一点，更显高级 */
+    opacity: 0.3;
     pointer-events: none; 
     z-index: 0;
 }
@@ -140,23 +140,25 @@ header { height: 56px; display: flex; justify-content: space-between; align-item
 .side-actions .bar-btn:hover { background: rgba(255,255,255,0.12); transform: scale(1.05); }
 .side-actions .delete-btn:hover { background: rgba(248, 113, 113, 0.1); }
 
-/* 快捷键提示角标 */
+/* 登录类型标签 */
 .login-type-badge {
-    display: inline-block; font-size: 10px; padding: 2px 8px;
-    border-radius: 6px; font-weight: 600; margin-left: 8px;
-    vertical-align: middle; letter-spacing: 0.3px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 12px; padding: 2px 10px;
+    border-radius: 6px; font-weight: 500;
+    letter-spacing: 0.2px;
+    gap: 4px;
 }
 .login-type-badge.password {
-    background: rgba(99, 102, 241, 0.12); color: var(--accent-color);
+    background: rgba(99, 102, 241, 0.08); color: var(--accent-color);
 }
 .login-type-badge.code {
-    background: rgba(16, 185, 129, 0.12); color: #10B981;
+    background: rgba(16, 185, 129, 0.08); color: #10B981;
 }
 [data-theme="light"] .login-type-badge.password {
-    background: rgba(99, 102, 241, 0.08);
+    background: rgba(99, 102, 241, 0.06);
 }
 [data-theme="light"] .login-type-badge.code {
-    background: rgba(16, 185, 129, 0.08);
+    background: rgba(16, 185, 129, 0.06);
 }
 .shortcut-badge {
     font-size: 10px;

@@ -448,9 +448,8 @@ function renderVault(filter = '') {
         card.innerHTML = `
             <div class="card-top">
                 <img class="site-icon" src="${faviconUrl}" onerror="this.src='icons/icon16.png'">
-                <div class="url-host">${parts.host}</div><span class="login-type-badge ${item.loginType === 'code' ? 'code' : 'password'}">${item.loginType === 'code' ? '📱 验证码' : '🔑 密码'}</span>
+                <div class="url-host">${parts.host}</div>
             </div>
-            ${(parts.path || parts.query) ? `
             <div class="url-details">
                 <div class="url-text-area">
                     ${parts.path ? `<div class="url-path">${parts.path}</div>` : ''}
@@ -460,7 +459,7 @@ function renderVault(filter = '') {
                     <button class="url-mini-btn copy-link" title="复制完整链接">🔗</button>
                     <button class="url-mini-btn open-link" title="新窗口打开">🌐</button>
                 </div>
-            </div>` : ''}
+            </div>
             <div class="card-body">
                 <p><span class="label-text">账号</span><span class="value-text">${item.username}</span><button class="copy-badge copy-user">复制</button></p>
                 <p><span class="label-text">密码</span><span class="value-text">${item.loginType === 'code' ? '（验证码/扫码登录）' : '••••••••'}</span>${item.loginType !== 'code' ? '<button class="copy-badge copy-pass">复制</button>' : ''}</p>
